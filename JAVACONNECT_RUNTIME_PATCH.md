@@ -45,3 +45,13 @@ Runtime JRE used by the wrapper remains under:
 ```text
 /data/data/org.levimc.launcher/files/JavaConnect/jre
 ```
+
+### 2026-06-13 libc++ fix
+
+`libjavaconn_java.so` is executed as a standalone APK-native executable. Some NDK builds add a dependency on `libc++_shared.so`; if that library is not packaged in the same native-lib directory, Android fails with:
+
+```text
+CANNOT LINK EXECUTABLE ... libjavaconn_java.so: library "libc++_shared.so" not found
+```
+
+This patch now builds the wrapper with `-static-libstdc++` and also copies the NDK `libc++_shared.so` into the generated `arm64-v8a` native-lib folder as a fallback.
