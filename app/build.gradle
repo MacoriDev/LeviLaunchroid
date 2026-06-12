@@ -74,6 +74,9 @@ tasks.register("prepareJavaConnectJavaExec") {
                     "-pie",
                     "-Wall",
                     "-Wextra",
+                    // Avoid a runtime dependency on libc++_shared.so when this file is
+                    // executed as a standalone APK-native executable.
+                    "-static-libstdc++",
                     src.absolutePath,
                     "-o", out.absolutePath,
                     "-ldl",
@@ -81,6 +84,26 @@ tasks.register("prepareJavaConnectJavaExec") {
         }
         out.setReadable(true, false)
         out.setExecutable(true, false)
+
+        // Some NDK/toolchain combinations still emit a DT_NEEDED entry for
+        // libc++_shared.so even with -static-libstdc++. Put the shared STL in
+        // the same APK native-lib directory as a fallback so Android's linker
+        // can resolve it when libjavaconn_java.so is execve()'d.
+        def libcxxCandidates = [
+                new File(ndk, "toolchains/llvm/prebuilt/${host}/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"),
+                new File(ndk, "toolchains/llvm/prebuilt/${host}/sysroot/usr/lib/aarch64-linux-android/28/libc++_shared.so")
+        ]
+        def libcxx = libcxxCandidates.find { it.exists() }
+        if (libcxx != null) {
+            copy {
+                from libcxx
+                into outputDir
+                rename { "libc++_shared.so" }
+            }
+            logger.lifecycle("Copied JavaConnect libc++ fallback: ${libcxx}")
+        } else {
+            logger.lifecycle("JavaConnect libc++ fallback not found; wrapper should be statically linked")
+        }
         logger.lifecycle("Built JavaConnect APK-native JVM wrapper: ${out}")
     }
 }
