@@ -1,10 +1,12 @@
 #include <jni.h>
 #include <dlfcn.h>
 #include <dirent.h>
+#include <malloc.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <optional>
@@ -15,6 +17,24 @@
 #ifndef JNI_VERSION_1_8
 #define JNI_VERSION_1_8 0x00010008
 #endif
+
+#ifndef M_BIONIC_SET_HEAP_TAGGING_LEVEL
+#define M_BIONIC_SET_HEAP_TAGGING_LEVEL -204
+#endif
+#ifndef M_HEAP_TAGGING_LEVEL_NONE
+#define M_HEAP_TAGGING_LEVEL_NONE 0
+#endif
+
+static void disableBionicHeapPointerTagging() {
+    // This wrapper is executed directly from the APK native-lib directory, not
+    // through Android's normal zygote app launch path. In that mode the manifest
+    // android:allowNativeHeapPointerTagging="false" escape hatch may not be
+    // applied before HotSpot starts. Disable bionic heap pointer tagging inside
+    // the wrapper process before creating the JVM so old/foreign native code in
+    // the JRE cannot trip Android's tagged-pointer check.
+    int rc = mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, M_HEAP_TAGGING_LEVEL_NONE);
+    std::cerr << "JavaConnect wrapper heap pointer tagging disable rc=" << rc << std::endl;
+}
 
 static bool fileExists(const std::string& p) {
     struct stat st{};
@@ -86,6 +106,8 @@ static jobjectArray makeStringArray(JNIEnv* env, const std::vector<std::string>&
 }
 
 int main(int argc, char** argv) {
+    disableBionicHeapPointerTagging();
+
     const char* homeEnv = std::getenv("JAVA_HOME");
     if (!homeEnv || !*homeEnv) homeEnv = std::getenv("JAVACONNECT_JAVA_HOME");
     if (!homeEnv || !*homeEnv) {
