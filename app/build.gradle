@@ -35,6 +35,74 @@ static def getVersionCodeByTimestamp() {
     return diff.toInteger()
 }
 
+
+def javaConnectRuntimeArchives = [
+        file("java-runtime/jre21-android-arm64.tar"),
+        file("java-runtime/jre21-android-arm64.tar.xz"),
+        file("java-runtime/jre21-android-aarch64.tar"),
+        file("java-runtime/jre21-android-aarch64.tar.xz"),
+        file("java-runtime/jre21-aarch64.tar"),
+        file("java-runtime/jre21-aarch64.tar.xz"),
+        file("java-runtime/jre21-aarch64.zip")
+]
+
+def findJavaConnectRuntimeArchive = {
+    def forced = System.getenv("JAVACONNECT_JRE_TAR")
+    if (forced != null && !forced.trim().isEmpty()) {
+        def f = file(forced.trim())
+        if (f.exists()) return f
+        throw new GradleException("JAVACONNECT_JRE_TAR is set but file does not exist: ${f}")
+    }
+    return javaConnectRuntimeArchives.find { it.exists() }
+}
+
+tasks.register("prepareJavaConnectJavaExec") {
+    def outDir = layout.buildDirectory.dir("generated/javaconnectJniLibs/arm64-v8a")
+    outputs.dir(outDir)
+    doLast {
+        def archive = findJavaConnectRuntimeArchive()
+        def outputDir = outDir.get().asFile
+        delete(outputDir)
+        outputDir.mkdirs()
+
+        if (archive == null) {
+            throw new GradleException("JavaConnect runtime archive not found. Put jre21-android-arm64.tar.xz in app/java-runtime/ or set JAVACONNECT_JRE_TAR.")
+        }
+
+        def workDir = file("${buildDir}/generated/javaconnectRuntimeExtract")
+        delete(workDir)
+        workDir.mkdirs()
+
+        def name = archive.name.toLowerCase(Locale.ROOT)
+        if (name.endsWith(".zip")) {
+            copy { from zipTree(archive); into workDir }
+        } else if (name.endsWith(".tar")) {
+            exec { commandLine "tar", "-xf", archive.absolutePath, "-C", workDir.absolutePath }
+        } else if (name.endsWith(".tar.xz") || name.endsWith(".txz")) {
+            exec { commandLine "tar", "-xJf", archive.absolutePath, "-C", workDir.absolutePath }
+        } else if (name.endsWith(".tar.gz") || name.endsWith(".tgz")) {
+            exec { commandLine "tar", "-xzf", archive.absolutePath, "-C", workDir.absolutePath }
+        } else {
+            throw new GradleException("Unsupported JavaConnect runtime archive format: ${archive}")
+        }
+
+        def javaFile = fileTree(workDir) { include "**/bin/java" }.files.find { it.isFile() }
+        if (javaFile == null) {
+            throw new GradleException("Could not find bin/java inside JavaConnect runtime archive: ${archive}")
+        }
+
+        copy {
+            from javaFile
+            into outputDir
+            rename { "libjavaconn_java.so" }
+        }
+        def packed = new File(outputDir, "libjavaconn_java.so")
+        packed.setReadable(true, false)
+        packed.setExecutable(true, false)
+        logger.lifecycle("Packaged JavaConnect executable as ${packed}")
+    }
+}
+
 android {
     namespace 'org.levimc.launcher'
     compileSdkVersion 36
@@ -54,6 +122,12 @@ android {
             cmake {
                 arguments "-DANDROID_STL=c++_shared"
             }
+        }
+    }
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs += ["${buildDir}/generated/javaconnectJniLibs"]
         }
     }
 
@@ -156,4 +230,9 @@ dependencies {
     androidTestImplementation libs.ext.junit
     androidTestImplementation libs.espresso.core
     implementation libs.glide
+}
+
+
+tasks.named("preBuild") {
+    dependsOn("prepareJavaConnectJavaExec")
 }
