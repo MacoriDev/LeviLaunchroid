@@ -1,54 +1,47 @@
 # JavaConnect runtime patch for LeviLaunchroid
 
-This patched source adds a Gradle task that packages the Android Java 21 `bin/java` executable into the APK native lib directory as:
+This patched launcher no longer packages `jre/bin/java` directly. Recent Android builds allow executing native ELF files from the APK native-library extraction directory, but the OpenJDK `bin/java` launcher may try to re-exec the app-writable copy of itself and fail with `Permission denied`.
+
+Instead, this patch builds a small APK-native executable wrapper and packages it as:
 
 ```text
 lib/arm64-v8a/libjavaconn_java.so
 ```
 
-This is needed because Android 10+ blocks executing files unpacked to app-writable paths such as `/sdcard` or `/data/data/<package>/files`.
+JavaConnect executes this wrapper from the APK native lib directory. The wrapper then loads:
+
+```text
+/data/data/org.levimc.launcher/files/JavaConnect/jre/lib/server/libjvm.so
+```
+
+and starts ViaProxy with `JNI_CreateJavaVM()` inside the separate wrapper process. This avoids executing `/sdcard/.../jre/bin/java` or `/data/data/.../files/.../bin/java`.
 
 ## How to use
 
-1. Put a Pojav/Android arm64 Java 21 runtime archive here:
+1. Build and install this patched LeviLaunchroid APK.
+2. Build/install the companion JavaConnect `.so` from the APK-wrapper source zip.
+3. JavaConnect still embeds/extracts the full JRE itself, so this launcher patch no longer needs a `jre21-android-arm64.tar.xz` file.
 
-```text
-app/java-runtime/jre21-android-arm64.tar.xz
-```
-
-Accepted archive formats/names include:
-
-```text
-jre21-android-arm64.tar
-jre21-android-arm64.tar.xz
-jre21-android-aarch64.tar
-jre21-android-aarch64.tar.xz
-jre21-aarch64.tar
-jre21-aarch64.tar.xz
-jre21-aarch64.zip
-```
-
-Or set an environment variable before building:
-
-```bash
-export JAVACONNECT_JRE_TAR=/path/to/jre21-android-arm64.tar.xz
-```
-
-2. Build the launcher APK normally.
-
-3. Install the rebuilt launcher APK.
-
-4. Build/install the companion JavaConnect `.so` from `JavaConnect_apk_native_exec_source.zip`.
-
-## What changed
+## Changed files
 
 - `app/build.gradle`
-  - adds `prepareJavaConnectJavaExec`
-  - extracts only `bin/java`
-  - packages it as generated JNI lib `libjavaconn_java.so`
+  - builds `src/main/cpp/javaconn_java_exec.cpp` with the NDK
+  - packages the result as generated JNI lib `libjavaconn_java.so`
+- `app/src/main/cpp/javaconn_java_exec.cpp`
+  - standalone native executable wrapper
+  - loads HotSpot `libjvm.so`
+  - launches the jar Main-Class via `sun.launcher.LauncherHelper`
 - `AndroidManifest.xml`
-  - adds `android:extractNativeLibs="true"`
-- `app/java-runtime/README.md`
-  - explains where to place the runtime archive
+  - keeps `android:extractNativeLibs="true"`
 
-The full JRE is still embedded/extracted by JavaConnect.so. The APK only needs the `bin/java` executable in an Android-approved executable location.
+User files remain under:
+
+```text
+/sdcard/games/JavaConnect
+```
+
+Runtime JRE used by the wrapper remains under:
+
+```text
+/data/data/org.levimc.launcher/files/JavaConnect/jre
+```

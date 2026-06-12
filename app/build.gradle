@@ -36,72 +36,55 @@ static def getVersionCodeByTimestamp() {
 }
 
 
-def javaConnectRuntimeArchives = [
-        file("java-runtime/jre21-android-arm64.tar"),
-        file("java-runtime/jre21-android-arm64.tar.xz"),
-        file("java-runtime/jre21-android-aarch64.tar"),
-        file("java-runtime/jre21-android-aarch64.tar.xz"),
-        file("java-runtime/jre21-aarch64.tar"),
-        file("java-runtime/jre21-aarch64.tar.xz"),
-        file("java-runtime/jre21-aarch64.zip")
-]
 
-def findJavaConnectRuntimeArchive = {
-    def forced = System.getenv("JAVACONNECT_JRE_TAR")
-    if (forced != null && !forced.trim().isEmpty()) {
-        def f = file(forced.trim())
-        if (f.exists()) return f
-        throw new GradleException("JAVACONNECT_JRE_TAR is set but file does not exist: ${f}")
-    }
-    return javaConnectRuntimeArchives.find { it.exists() }
+def javaConnectHostTag() {
+    def os = System.getProperty("os.name").toLowerCase(Locale.ROOT)
+    if (os.contains("windows")) return "windows-x86_64"
+    if (os.contains("mac")) return "darwin-x86_64"
+    return "linux-x86_64"
 }
 
 tasks.register("prepareJavaConnectJavaExec") {
+    def src = file("src/main/cpp/javaconn_java_exec.cpp")
     def outDir = layout.buildDirectory.dir("generated/javaconnectJniLibs/arm64-v8a")
+    inputs.file(src)
     outputs.dir(outDir)
     doLast {
-        def archive = findJavaConnectRuntimeArchive()
         def outputDir = outDir.get().asFile
         delete(outputDir)
         outputDir.mkdirs()
 
-        if (archive == null) {
-            throw new GradleException("JavaConnect runtime archive not found. Put jre21-android-arm64.tar.xz in app/java-runtime/ or set JAVACONNECT_JRE_TAR.")
+        def ndk = android.ndkDirectory
+        if (ndk == null || !ndk.exists()) {
+            throw new GradleException("Android NDK is required to build JavaConnect native Java wrapper")
+        }
+        def host = javaConnectHostTag()
+        def binDir = new File(ndk, "toolchains/llvm/prebuilt/${host}/bin")
+        def clang = new File(binDir, host.startsWith("windows") ? "aarch64-linux-android28-clang++.cmd" : "aarch64-linux-android28-clang++")
+        if (!clang.exists()) {
+            throw new GradleException("Could not find NDK clang: ${clang}")
         }
 
-        def workDir = file("${buildDir}/generated/javaconnectRuntimeExtract")
-        delete(workDir)
-        workDir.mkdirs()
-
-        def name = archive.name.toLowerCase(Locale.ROOT)
-        if (name.endsWith(".zip")) {
-            copy { from zipTree(archive); into workDir }
-        } else if (name.endsWith(".tar")) {
-            exec { commandLine "tar", "-xf", archive.absolutePath, "-C", workDir.absolutePath }
-        } else if (name.endsWith(".tar.xz") || name.endsWith(".txz")) {
-            exec { commandLine "tar", "-xJf", archive.absolutePath, "-C", workDir.absolutePath }
-        } else if (name.endsWith(".tar.gz") || name.endsWith(".tgz")) {
-            exec { commandLine "tar", "-xzf", archive.absolutePath, "-C", workDir.absolutePath }
-        } else {
-            throw new GradleException("Unsupported JavaConnect runtime archive format: ${archive}")
+        def out = new File(outputDir, "libjavaconn_java.so")
+        exec {
+            commandLine clang.absolutePath,
+                    "-std=c++17",
+                    "-O2",
+                    "-fPIE",
+                    "-pie",
+                    "-Wall",
+                    "-Wextra",
+                    src.absolutePath,
+                    "-o", out.absolutePath,
+                    "-ldl",
+                    "-llog"
         }
-
-        def javaFile = fileTree(workDir) { include "**/bin/java" }.files.find { it.isFile() }
-        if (javaFile == null) {
-            throw new GradleException("Could not find bin/java inside JavaConnect runtime archive: ${archive}")
-        }
-
-        copy {
-            from javaFile
-            into outputDir
-            rename { "libjavaconn_java.so" }
-        }
-        def packed = new File(outputDir, "libjavaconn_java.so")
-        packed.setReadable(true, false)
-        packed.setExecutable(true, false)
-        logger.lifecycle("Packaged JavaConnect executable as ${packed}")
+        out.setReadable(true, false)
+        out.setExecutable(true, false)
+        logger.lifecycle("Built JavaConnect APK-native JVM wrapper: ${out}")
     }
 }
+
 
 android {
     namespace 'org.levimc.launcher'
@@ -235,4 +218,8 @@ dependencies {
 
 tasks.named("preBuild") {
     dependsOn("prepareJavaConnectJavaExec")
+}
+
+tasks.matching { it.name == "preBuild" || (it.name.startsWith("merge") && it.name.endsWith("JniLibFolders")) }.configureEach {
+    dependsOn tasks.named("prepareJavaConnectJavaExec")
 }
