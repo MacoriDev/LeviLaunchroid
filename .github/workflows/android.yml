@@ -14,12 +14,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: "recursive"
+          submodules: recursive
 
       - name: Prepare google-services.json
         env:
@@ -27,10 +28,12 @@ jobs:
         run: |
           set -euo pipefail
 
+          mkdir -p app
+
           if [ -z "${GOOGLE_SERVICES_JSON_BASE64:-}" ]; then
             echo "HAS_GOOGLE_SERVICES=false" >> "$GITHUB_ENV"
-            echo "GOOGLE_SERVICES_JSON_BASE64 is not configured; using a CI-only Firebase placeholder for compile checks."
-            mkdir -p app
+            echo "Using CI-only Firebase placeholder."
+
             cat > app/google-services.json <<'JSON'
           {
             "project_info": {
@@ -62,17 +65,19 @@ jobs:
             "configuration_version": "1"
           }
           JSON
+
             exit 0
           fi
 
-          mkdir -p app
           printf '%s' "${GOOGLE_SERVICES_JSON_BASE64}" | base64 --decode > app/google-services.json
           python3 -m json.tool app/google-services.json > /dev/null
+
           python3 - <<'PY'
           import json
           import sys
 
           expected = "org.levimc.launcher"
+
           with open("app/google-services.json", encoding="utf-8") as fp:
               data = json.load(fp)
 
@@ -82,6 +87,7 @@ jobs:
               .get("package_name")
               for client in data.get("client", [])
           }
+
           if expected not in package_names:
               actual = ", ".join(sorted(name for name in package_names if name)) or "<none>"
               print(
@@ -90,6 +96,7 @@ jobs:
               )
               sys.exit(1)
           PY
+
           echo "HAS_GOOGLE_SERVICES=true" >> "$GITHUB_ENV"
 
       - name: Setup Java JDK
@@ -129,36 +136,40 @@ jobs:
       - name: Inject API Keys
         env:
           CF_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
-        run: echo "curseforge.api_key=${CF_API_KEY}" >> local.properties
+        run: echo "curseforge.api_key=${CF_API_KEY:-}" >> local.properties
 
-      - name: Build Debug, Beta and Unsigned Release APKs
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug
+
+      - name: Build Beta and Unsigned Release APKs
         if: env.HAS_GOOGLE_SERVICES == 'true'
-        run: ./gradlew assembleDebug assembleBeta assembleRelease
+        run: ./gradlew assembleBeta assembleRelease
 
-      - name: Compile Debug Without Firebase Secrets
-        if: env.HAS_GOOGLE_SERVICES == 'false'
-        run: ./gradlew :app:compileDebugKotlin :app:compileDebugJavaWithJavac
+      - name: List APK outputs
+        run: find app/build/outputs/apk -type f -name "*.apk" -print || true
 
       - name: Upload Debug APK
-        if: env.HAS_GOOGLE_SERVICES == 'true'
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: LeviLauncher-debug-apk
+          name: LeviLaunchroid-debug-apk
           path: app/build/outputs/apk/debug/*.apk
-
-      - name: Upload Unsigned Release APK
-        if: env.HAS_GOOGLE_SERVICES == 'true'
-        uses: actions/upload-artifact@v4.6.2
-        with:
-          name: LeviLauncher-release-unsigned-apk
-          path: app/build/outputs/apk/release/*-unsigned.apk
+          if-no-files-found: error
 
       - name: Upload Beta APK
         if: env.HAS_GOOGLE_SERVICES == 'true'
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: LeviLauncher-beta-apk
+          name: LeviLaunchroid-beta-apk
           path: app/build/outputs/apk/beta/*.apk
+          if-no-files-found: error
+
+      - name: Upload Unsigned Release APK
+        if: env.HAS_GOOGLE_SERVICES == 'true'
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: LeviLaunchroid-release-unsigned-apk
+          path: app/build/outputs/apk/release/*-unsigned.apk
+          if-no-files-found: error
 
       - name: Sign Release APK
         if: env.HAS_GOOGLE_SERVICES == 'true' && startsWith(github.ref, 'refs/tags/')
@@ -177,9 +188,9 @@ jobs:
       - name: Rename APK with tag
         if: env.HAS_GOOGLE_SERVICES == 'true' && startsWith(github.ref, 'refs/tags/')
         run: |
-          TAG=${GITHUB_REF_NAME}
+          TAG="${GITHUB_REF_NAME}"
           SIGNED_APK="${{ steps.sign_app.outputs.signedReleaseFile }}"
-          APK_DST="LeviLauncher-${TAG}-release.apk"
+          APK_DST="LeviLaunchroid-${TAG}-release.apk"
           cp "$SIGNED_APK" "$APK_DST"
           echo "Signed APK renamed to $APK_DST"
 
@@ -187,14 +198,15 @@ jobs:
         if: env.HAS_GOOGLE_SERVICES == 'true' && startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: LeviLauncher-${{ github.ref_name }}-release.apk
-          path: LeviLauncher-${{ github.ref_name }}-release.apk
+          name: LeviLaunchroid-${{ github.ref_name }}-release-apk
+          path: LeviLaunchroid-${{ github.ref_name }}-release.apk
+          if-no-files-found: error
 
       - name: Release APK to GitHub Releases
         if: env.HAS_GOOGLE_SERVICES == 'true' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: LeviLauncher-${{ github.ref_name }}-release.apk
+          files: LeviLaunchroid-${{ github.ref_name }}-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -202,10 +214,10 @@ jobs:
         if: env.HAS_GOOGLE_SERVICES == 'true' && startsWith(github.ref, 'refs/tags/')
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          APK_URL: "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/LeviLauncher-${{ github.ref_name }}-release.apk"
+          APK_URL: "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/LeviLaunchroid-${{ github.ref_name }}-release.apk"
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          EMBED_TITLE="🚀 LeviLauncher Update!"
+          EMBED_TITLE="🚀 LeviLaunchroid Update!"
           EMBED_DESC="A new version of **LeviLaunchroid** is ready."
           EMBED_COLOR=5814783
           THUMB_URL='https://avatars.githubusercontent.com/u/78095377?s=200&v=4'
