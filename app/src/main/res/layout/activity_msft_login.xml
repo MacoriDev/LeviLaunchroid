@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <!-- Content: WebView full area -->
+        <WebView
+            android:id="@+id/msft_login_webview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:background="@color/surface"
+            android:elevation="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/ms_login_title"
+                android:textStyle="bold"
+                android:textSize="18sp"
+                android:textColor="@color/primary"
+                android:fontFamily="@font/misans"/>
+
+        </LinearLayout>
+
+        <!-- Hidden status text for background updates -->
+        <TextView
+            android:id="@+id/msft_login_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="56dp"
+            android:visibility="gone"
+            android:text="@string/ms_login_starting"
+            android:textColor="@color/on_surface"
+            android:textSize="14sp"
+            android:fontFamily="@font/misans"/>
+
+    </FrameLayout>
+
+</FrameLayout>
