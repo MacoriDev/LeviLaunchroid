@@ -523,7 +523,7 @@ Migration must complete before LeviLauncher can continue.</string>
     <string name="label_current_account">Current Account</string>
     <string name="label_other_accounts">Other Accounts</string>
 
-    <string name="crash_title">Application crashed</string>
+    <string name="crash_title">게임 크래시 발생</string>
     <string name="crash_upload">Crash report upload</string>
     <string name="crash_details_title">Crash details</string>
     <string name="crash_back_to_main">Back to Home</string>
